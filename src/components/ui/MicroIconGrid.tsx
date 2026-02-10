@@ -16,6 +16,8 @@ interface TechIcon {
   // Use local image from public folder
   useLocalImage?: boolean;
   localPath?: string;
+  // Skip image loading entirely, show text fallback
+  useFallback?: boolean;
 }
 
 // All tech icons with brand colors - ordered by importance
@@ -30,7 +32,7 @@ const techIcons: TechIcon[] = [
   { name: "Apache Airflow", slug: "apacheairflow", color: "017CEE", useLocalImage: true, localPath: "/logos/airflow.png" },
   { name: "Kafka", slug: "apachekafka", color: "231F20" },
   { name: "Databricks", slug: "databricks", color: "FF3621" },
-  { name: "DBT", slug: "dbt", color: "FF694B" },
+  { name: "dbt", slug: "dbt", color: "FF694B", useFallback: true }, // No CDN icon available
   // Cloud Platforms (Multi-Cloud Expert)
   { name: "Google Cloud", slug: "googlecloud", color: "4285F4" },
   { name: "AWS", slug: "aws", color: "FF9900", useLocalImage: true, localPath: "/logos/aws.png" },
@@ -48,6 +50,9 @@ const techIcons: TechIcon[] = [
 function IconWithTooltip({ icon, index }: { icon: TechIcon; index: number }) {
   const [showTooltip, setShowTooltip] = useState(false);
   const [hasError, setHasError] = useState(false);
+  
+  // Use fallback text directly if flagged
+  const showFallback = icon.useFallback || hasError;
   
   // Use local image, Devicon CDN, or Simple Icons
   const deviconVariant = icon.deviconVariant || "original";
@@ -79,7 +84,7 @@ function IconWithTooltip({ icon, index }: { icon: TechIcon; index: number }) {
           "transition-all duration-200 cursor-default group"
         )}
       >
-        {hasError ? (
+        {showFallback ? (
           // Fallback: Show initials with brand color
           <span 
             className="text-[10px] font-bold"

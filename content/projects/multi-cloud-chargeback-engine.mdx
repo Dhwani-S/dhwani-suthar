@@ -1,0 +1,131 @@
+---
+title: "Enterprise Multi-Cloud Chargeback Engine"
+summary: "Custom FinOps pipeline processing TB-scale billing data. Replaced legacy SaaS tools with a purpose-built solution."
+date: "2025-01-15"
+tags: ["PySpark", "Databricks", "Airflow", "AWS CUR", "GCP Billing", "FinOps"]
+featured: true
+metrics:
+  - label: "Annual Savings"
+    value: "$1.5M"
+  - label: "Allocation Accuracy"
+    value: "99.9%"
+  - label: "Data Processed"
+    value: "TB-scale"
+  - label: "Business Units"
+    value: "50+"
+---
+
+## Overview
+
+Replaced legacy SaaS tools with a custom-built chargeback engine that processes terabyte-scale billing data across AWS, Azure, and GCP. The system ingests raw billing exports and merges them with Prometheus usage metrics to allocate shared Kubernetes costs to specific business units.
+
+## The Challenge
+
+The organization faced several critical issues with their existing cloud cost management:
+
+- **Vendor Lock-in**: Expensive SaaS tools with limited customization
+- **Data Silos**: Billing data spread across multiple cloud providers
+- **Shared Cost Allocation**: No way to accurately attribute shared Kubernetes infrastructure costs
+- **Delayed Insights**: Weekly batch processing couldn't keep up with cloud dynamics
+
+## Solution Architecture
+
+### Data Ingestion Layer
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Raw Data Sources                          │
+├─────────────┬─────────────┬─────────────┬──────────────────┤
+│   AWS CUR   │  GCP Billing │ Azure Cost  │   Prometheus     │
+│   Export    │   Export     │   Export    │   Metrics        │
+└──────┬──────┴──────┬───────┴──────┬──────┴────────┬─────────┘
+       │             │              │               │
+       ▼             ▼              ▼               ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Apache Airflow Orchestration                    │
+├─────────────────────────────────────────────────────────────┤
+│                   PySpark on Databricks                      │
+│         (Transformation, Normalization, Enrichment)          │
+├─────────────────────────────────────────────────────────────┤
+│                    Delta Lake Storage                        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Cost Allocation Engine
+
+The core innovation is the **weighted allocation algorithm** for shared Kubernetes costs:
+
+```python
+def allocate_k8s_costs(
+    billing_df: DataFrame,
+    prometheus_df: DataFrame,
+    allocation_rules: dict
+) -> DataFrame:
+    """
+    Allocate shared K8s costs based on actual resource consumption.
+    
+    Uses Prometheus metrics (CPU, Memory, Network) to calculate
+    weighted cost distribution across business units.
+    """
+    
+    # Join billing with usage metrics
+    enriched_df = billing_df.join(
+        prometheus_df,
+        on=["cluster_id", "namespace", "timestamp"],
+        how="left"
+    )
+    
+    # Calculate resource weights
+    weighted_df = enriched_df.withColumn(
+        "cpu_weight",
+        col("cpu_usage") / sum("cpu_usage").over(cluster_window)
+    ).withColumn(
+        "memory_weight", 
+        col("memory_usage") / sum("memory_usage").over(cluster_window)
+    )
+    
+    # Apply composite allocation
+    allocated_df = weighted_df.withColumn(
+        "allocated_cost",
+        col("shared_cost") * (
+            col("cpu_weight") * 0.6 + 
+            col("memory_weight") * 0.4
+        )
+    )
+    
+    return allocated_df
+```
+
+### Key Features
+
+1. **Multi-Cloud Normalization**: Unified schema across AWS, GCP, and Azure billing formats
+2. **Real-time Prometheus Integration**: Actual usage metrics for accurate allocation
+3. **Automated Tagging Remediation**: ML-based tag suggestion for untagged resources
+4. **Showback Dashboards**: Self-service cost visibility for engineering teams
+5. **Anomaly Detection**: Automated alerts for cost spikes
+
+## Results
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Monthly Cloud Spend Visibility | 60% | 99.9% |
+| Cost Allocation Accuracy | ~70% | 99.9% |
+| Time to Generate Reports | 2 days | 15 minutes |
+| Annual Tool Cost | $200K | $0 (internal) |
+| **Total Annual Savings** | - | **$1.5M** |
+
+## Tech Stack
+
+- **Processing**: PySpark on Databricks
+- **Orchestration**: Apache Airflow
+- **Storage**: Delta Lake on S3
+- **Data Sources**: AWS CUR, GCP Billing Export, Azure Cost Management
+- **Metrics**: Prometheus, Grafana
+- **Visualization**: Custom dashboards + Looker
+
+## Lessons Learned
+
+1. **Start with data quality**: 80% of the effort was normalizing messy billing data
+2. **Involve finance early**: Their requirements shaped the allocation logic
+3. **Build for auditability**: Every cost allocation needs a paper trail
+4. **Automate tag governance**: Manual tagging doesn't scale

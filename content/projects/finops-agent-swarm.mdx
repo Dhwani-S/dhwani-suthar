@@ -1,0 +1,194 @@
+---
+title: "Autonomous FinOps Agent Swarm"
+summary: "Multi-agent system for automated cloud cost analysis using LangGraph, Gemini, and Knowledge Graphs."
+date: "2025-02-01"
+tags: ["LangGraph", "Gemini", "BigQuery", "Neo4j", "GenAI", "FinOps"]
+featured: true
+metrics:
+  - label: "Query Time Reduction"
+    value: "90%"
+  - label: "Schema Hallucinations"
+    value: "Zero"
+  - label: "Agents Deployed"
+    value: "5+"
+  - label: "Queries Automated"
+    value: "500+/day"
+---
+
+## Overview
+
+A Supervisor-Worker agent system where specialized AI agents collaborate to analyze cloud costs, write optimized SQL queries, and simulate commitment discount scenarios. The system uses a Knowledge Graph to map technical cloud resources to business owners, eliminating LLM hallucinations on schema.
+
+## The Challenge
+
+Finance and engineering teams struggled with cloud cost analysis:
+
+- **Complex Queries**: Analysts spent hours writing SQL for cost breakdowns
+- **Schema Confusion**: LLMs hallucinated column names and table relationships
+- **Manual Optimization**: Identifying savings opportunities required expert knowledge
+- **Slow Turnaround**: Cost analysis requests took days to fulfill
+
+## Solution: Agent Swarm Architecture
+
+### System Design
+
+```
+                    ┌─────────────────────┐
+                    │   Supervisor Agent   │
+                    │  (Task Orchestrator) │
+                    └──────────┬──────────┘
+                               │
+           ┌───────────────────┼───────────────────┐
+           │                   │                   │
+           ▼                   ▼                   ▼
+    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+    │   Analyst   │    │  Optimizer  │    │  Reporter   │
+    │    Agent    │    │    Agent    │    │    Agent    │
+    │ (SQL Writer)│    │(CUD Simulator│    │(Viz & Alerts│
+    └──────┬──────┘    └──────┬──────┘    └──────┬──────┘
+           │                   │                   │
+           └───────────────────┼───────────────────┘
+                               │
+                    ┌──────────▼──────────┐
+                    │   Knowledge Graph    │
+                    │      (Neo4j)         │
+                    │  Schema + Ownership  │
+                    └─────────────────────┘
+```
+
+### Agent Roles
+
+#### 1. Supervisor Agent
+Orchestrates the workflow, routes queries to appropriate agents, and aggregates results.
+
+```python
+from langgraph.graph import StateGraph, END
+
+class SupervisorAgent:
+    def __init__(self):
+        self.workflow = StateGraph(AgentState)
+        self._build_graph()
+    
+    def _build_graph(self):
+        # Define agent nodes
+        self.workflow.add_node("classify", self.classify_intent)
+        self.workflow.add_node("analyst", self.analyst_agent)
+        self.workflow.add_node("optimizer", self.optimizer_agent)
+        self.workflow.add_node("reporter", self.reporter_agent)
+        
+        # Define routing logic
+        self.workflow.add_conditional_edges(
+            "classify",
+            self.route_to_agent,
+            {
+                "analysis": "analyst",
+                "optimization": "optimizer",
+                "report": "reporter"
+            }
+        )
+```
+
+#### 2. Analyst Agent (SQL Writer)
+Generates accurate SQL queries by consulting the Knowledge Graph for schema information.
+
+```python
+class AnalystAgent:
+    def __init__(self, kg_client: Neo4jClient, llm: Gemini):
+        self.kg = kg_client
+        self.llm = llm
+    
+    async def generate_query(self, question: str) -> str:
+        # Fetch relevant schema from Knowledge Graph
+        schema_context = await self.kg.query("""
+            MATCH (t:Table)-[:HAS_COLUMN]->(c:Column)
+            WHERE t.domain = 'billing'
+            RETURN t.name, collect(c.name) as columns
+        """)
+        
+        # Generate SQL with grounded schema
+        prompt = f"""
+        Given this exact schema:
+        {schema_context}
+        
+        Write a BigQuery SQL query to answer:
+        {question}
+        
+        Use ONLY the tables and columns provided above.
+        """
+        
+        return await self.llm.generate(prompt)
+```
+
+#### 3. Optimizer Agent (CUD Simulator)
+Simulates Committed Use Discount scenarios to identify savings opportunities.
+
+```python
+class OptimizerAgent:
+    def simulate_commitments(
+        self,
+        usage_data: DataFrame,
+        commitment_options: list
+    ) -> dict:
+        """
+        Simulate different CUD/RI scenarios to find optimal coverage.
+        """
+        results = []
+        
+        for option in commitment_options:
+            savings = self._calculate_savings(
+                usage_data,
+                commitment_term=option['term'],
+                commitment_level=option['coverage']
+            )
+            results.append({
+                'option': option,
+                'projected_savings': savings,
+                'break_even_months': self._break_even(savings, option)
+            })
+        
+        return sorted(results, key=lambda x: x['projected_savings'], reverse=True)
+```
+
+### Knowledge Graph Schema
+
+The Neo4j Knowledge Graph eliminates hallucinations by providing grounded schema information:
+
+```cypher
+// Resource to Owner mapping
+(:CloudResource {id, type, tags})
+  -[:OWNED_BY]->(:BusinessUnit {name, cost_center})
+  -[:MANAGED_BY]->(:Team {name, slack_channel})
+
+// Schema mapping
+(:Table {name, description})
+  -[:HAS_COLUMN]->(:Column {name, type, description})
+  -[:JOINS_WITH]->(:Table)
+
+// Cost allocation rules
+(:AllocationRule {name, formula})
+  -[:APPLIES_TO]->(:ResourceType)
+```
+
+## Results
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Avg Query Response Time | 2-4 hours | 12 minutes |
+| Schema-related Errors | 40% of queries | 0% |
+| Manual SQL Writing | 100% | 10% (edge cases) |
+| Optimization Recommendations | Monthly | Real-time |
+
+## Tech Stack
+
+- **Agent Framework**: LangGraph
+- **LLM**: Google Gemini Pro
+- **Knowledge Graph**: Neo4j
+- **Data Warehouse**: BigQuery
+- **Orchestration**: Cloud Functions + Pub/Sub
+
+## Key Innovations
+
+1. **Schema Grounding**: Knowledge Graph prevents LLM hallucinations
+2. **Multi-Agent Collaboration**: Specialized agents for different tasks
+3. **Feedback Loop**: Failed queries improve the Knowledge Graph
+4. **Human-in-the-Loop**: Critical decisions require approval

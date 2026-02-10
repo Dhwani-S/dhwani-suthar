@@ -1,0 +1,191 @@
+---
+title: "GraphRAG Knowledge Engine"
+summary: "Eliminating LLM hallucinations with Graph Theory. RAG system mapping 50+ database tables for natural language querying."
+date: "2024-11-20"
+tags: ["Neo4j", "LangChain", "Oracle", "RAG", "GenAI", "NLP"]
+featured: true
+metrics:
+  - label: "Tables Mapped"
+    value: "50+"
+  - label: "Query Accuracy"
+    value: "95%+"
+  - label: "Hallucination Rate"
+    value: "<1%"
+  - label: "User Adoption"
+    value: "200+ users"
+---
+
+## Overview
+
+Built a Retrieval-Augmented Generation (RAG) system that uses Graph Theory to map complex database relationships, enabling finance teams to query data using natural language without SQL knowledge. The Knowledge Graph structure eliminates LLM hallucinations by grounding responses in verified schema information.
+
+## The Problem
+
+Finance teams needed to query complex Oracle databases but faced significant barriers:
+
+- **SQL Expertise Gap**: Finance analysts aren't SQL developers
+- **Schema Complexity**: 50+ interconnected tables with cryptic naming conventions
+- **LLM Unreliability**: ChatGPT-style tools hallucinated table and column names
+- **Documentation Debt**: Tribal knowledge locked in senior employees' heads
+
+## Solution: GraphRAG Architecture
+
+### Why Graph + RAG?
+
+Traditional RAG systems use vector similarity to retrieve context. But for structured data queries, you need **relationship awareness**:
+
+```
+Traditional RAG:
+Question → Vector Search → Similar Docs → LLM → Answer
+                                          ↓
+                               (May hallucinate schema)
+
+GraphRAG:
+Question → Entity Extraction → Graph Traversal → Verified Schema → LLM → Answer
+                                                                    ↓
+                                                        (Grounded in real schema)
+```
+
+### Knowledge Graph Design
+
+```cypher
+// Core Schema Nodes
+(:Database {name: "FINOPS_DW"})
+  -[:CONTAINS]->(:Schema {name: "BILLING"})
+    -[:HAS_TABLE]->(:Table {name, description, business_owner})
+      -[:HAS_COLUMN]->(:Column {name, type, description, pii_flag})
+
+// Relationship Mapping
+(:Table)-[:FOREIGN_KEY {column}]->(:Table)
+(:Table)-[:COMMONLY_JOINED_WITH]->(:Table)
+
+// Business Context
+(:Table)-[:ANSWERS_QUESTION]->(:BusinessQuestion)
+(:Column)-[:REPRESENTS]->(:BusinessConcept)
+
+// Lineage
+(:Table)-[:SOURCED_FROM]->(:SourceSystem)
+(:Column)-[:DERIVED_FROM]->(:Column)
+```
+
+### Query Pipeline
+
+```python
+from langchain.chains import GraphCypherQAChain
+from langchain_community.graphs import Neo4jGraph
+
+class GraphRAGEngine:
+    def __init__(self):
+        self.graph = Neo4jGraph(
+            url="bolt://localhost:7687",
+            username="neo4j",
+            password="***"
+        )
+        self.llm = ChatOpenAI(model="gpt-4")
+        
+    async def answer_question(self, question: str) -> dict:
+        # Step 1: Extract entities from question
+        entities = await self._extract_entities(question)
+        
+        # Step 2: Retrieve relevant schema via graph traversal
+        schema_context = await self._get_schema_context(entities)
+        
+        # Step 3: Generate SQL with grounded schema
+        sql_query = await self._generate_sql(question, schema_context)
+        
+        # Step 4: Execute and format results
+        results = await self._execute_query(sql_query)
+        
+        return {
+            "answer": self._format_answer(results),
+            "sql": sql_query,
+            "confidence": self._calculate_confidence(schema_context),
+            "sources": schema_context["tables_used"]
+        }
+    
+    async def _get_schema_context(self, entities: list) -> dict:
+        """
+        Traverse graph to find relevant tables and their relationships.
+        """
+        cypher = """
+        MATCH (t:Table)-[:HAS_COLUMN]->(c:Column)
+        WHERE any(entity IN $entities WHERE 
+            toLower(t.name) CONTAINS toLower(entity) OR
+            toLower(t.description) CONTAINS toLower(entity) OR
+            toLower(c.description) CONTAINS toLower(entity)
+        )
+        WITH t, collect(c) as columns
+        
+        // Get related tables via foreign keys
+        OPTIONAL MATCH (t)-[:FOREIGN_KEY]->(related:Table)
+        
+        RETURN t.name as table_name,
+               t.description as table_desc,
+               [col in columns | {name: col.name, type: col.type}] as columns,
+               collect(DISTINCT related.name) as related_tables
+        """
+        
+        return self.graph.query(cypher, {"entities": entities})
+```
+
+### Example Interaction
+
+**User Question:**
+> "What was our AWS EC2 spend by department last quarter?"
+
+**GraphRAG Process:**
+
+1. **Entity Extraction**: `[AWS, EC2, spend, department, quarter]`
+
+2. **Graph Traversal**:
+```cypher
+MATCH path = (t:Table {name: 'CLOUD_COSTS'})
+  -[:HAS_COLUMN]->(c:Column)
+WHERE c.description CONTAINS 'department' OR c.description CONTAINS 'cost'
+RETURN t, collect(c)
+```
+
+3. **Retrieved Schema**:
+```
+Table: CLOUD_COSTS
+Columns: cost_date, service_name, department_id, amount_usd
+Joins: DEPARTMENTS (via department_id)
+```
+
+4. **Generated SQL**:
+```sql
+SELECT d.department_name,
+       SUM(c.amount_usd) as total_spend
+FROM CLOUD_COSTS c
+JOIN DEPARTMENTS d ON c.department_id = d.id
+WHERE c.service_name = 'Amazon EC2'
+  AND c.cost_date >= DATE_TRUNC('quarter', CURRENT_DATE - INTERVAL '3 months')
+  AND c.cost_date < DATE_TRUNC('quarter', CURRENT_DATE)
+GROUP BY d.department_name
+ORDER BY total_spend DESC
+```
+
+## Results
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Query Success Rate | 45% | 95%+ |
+| Hallucinated Columns | 30% of queries | <1% |
+| Time to Answer | Hours (manual) | Seconds |
+| SQL Knowledge Required | Expert | None |
+| User Adoption | IT only | 200+ finance users |
+
+## Tech Stack
+
+- **Knowledge Graph**: Neo4j
+- **LLM Framework**: LangChain
+- **Database**: Oracle
+- **Embedding Model**: OpenAI text-embedding-3
+- **UI**: Streamlit chat interface
+
+## Key Learnings
+
+1. **Graphs beat vectors for schema**: Relationship-aware retrieval is crucial
+2. **Business context matters**: Column descriptions > column names
+3. **Confidence scoring**: Users need to know when to trust answers
+4. **Feedback loops**: Wrong answers improve the graph

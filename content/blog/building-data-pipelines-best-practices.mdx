@@ -1,0 +1,134 @@
+---
+title: "Building Robust Data Pipelines: Best Practices"
+summary: "Learn the essential patterns and practices for building reliable, scalable, and maintainable data pipelines in modern data platforms."
+date: "2024-01-25"
+tags: ["Data Engineering", "ETL", "Best Practices", "Python"]
+author: "Data Engineer"
+---
+
+## Introduction
+
+Data pipelines are the backbone of any modern data platform. In this article, I'll share the patterns and practices I've learned from building production pipelines processing billions of records.
+
+## Core Principles
+
+### 1. Idempotency
+
+Your pipeline should produce the same result regardless of how many times it runs:
+
+```python
+def upsert_data(df: DataFrame, target_table: str, key_columns: list):
+    """
+    Idempotent write operation using MERGE.
+    Running multiple times with same data produces same result.
+    """
+    df.createOrReplaceTempView("source")
+    
+    merge_condition = " AND ".join(
+        [f"target.{col} = source.{col}" for col in key_columns]
+    )
+    
+    spark.sql(f"""
+        MERGE INTO {target_table} AS target
+        USING source
+        ON {merge_condition}
+        WHEN MATCHED THEN UPDATE SET *
+        WHEN NOT MATCHED THEN INSERT *
+    """)
+```
+
+### 2. Fault Tolerance
+
+Design for failure:
+
+- **Checkpointing**: Save progress to resume from failures
+- **Dead Letter Queues**: Capture failed records for investigation
+- **Retries**: Implement exponential backoff for transient errors
+
+### 3. Observability
+
+You can't fix what you can't see:
+
+```python
+import structlog
+from datadog import statsd
+
+logger = structlog.get_logger()
+
+def process_batch(batch_id: str, records: list):
+    start_time = time.time()
+    
+    try:
+        processed = transform(records)
+        
+        # Metrics
+        statsd.increment("pipeline.batches.processed")
+        statsd.gauge("pipeline.records.count", len(processed))
+        
+        # Structured logging
+        logger.info(
+            "batch_processed",
+            batch_id=batch_id,
+            record_count=len(processed),
+            duration_ms=(time.time() - start_time) * 1000
+        )
+        
+        return processed
+    except Exception as e:
+        statsd.increment("pipeline.batches.failed")
+        logger.error("batch_failed", batch_id=batch_id, error=str(e))
+        raise
+```
+
+## Data Quality
+
+### Schema Validation
+
+```python
+from pydantic import BaseModel, validator
+from typing import Optional
+from datetime import datetime
+
+class UserEvent(BaseModel):
+    user_id: str
+    event_type: str
+    timestamp: datetime
+    properties: Optional[dict] = {}
+    
+    @validator('event_type')
+    def validate_event_type(cls, v):
+        allowed = ['click', 'view', 'purchase', 'signup']
+        if v not in allowed:
+            raise ValueError(f'event_type must be one of {allowed}')
+        return v
+```
+
+### Data Quality Checks
+
+```python
+def run_quality_checks(df: DataFrame) -> dict:
+    """Run data quality checks and return results."""
+    checks = {
+        "row_count": df.count(),
+        "null_user_id": df.filter(col("user_id").isNull()).count(),
+        "duplicate_events": df.count() - df.dropDuplicates().count(),
+        "future_timestamps": df.filter(col("timestamp") > current_timestamp()).count()
+    }
+    
+    # Fail if critical checks don't pass
+    assert checks["null_user_id"] == 0, "Found null user_ids"
+    assert checks["duplicate_events"] < checks["row_count"] * 0.01, "Too many duplicates"
+    
+    return checks
+```
+
+## Testing Strategies
+
+1. **Unit Tests**: Test individual transformations
+2. **Integration Tests**: Test end-to-end with sample data
+3. **Data Contracts**: Validate schema compatibility
+4. **Shadow Mode**: Run new pipelines in parallel before cutover
+
+## Conclusion
+
+Building robust data pipelines requires attention to detail in design, testing, and operations. By following these practices, you can build pipelines that are reliable, maintainable, and scalable.
